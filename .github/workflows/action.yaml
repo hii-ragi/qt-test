@@ -2,6 +2,8 @@ name: build-windows
 
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -65,9 +67,61 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Startup failed: $kind ($LASTEXITCODE)" }
           }
 
+      - name: Package release asset
+        run: Compress-Archive -Path dist/* -DestinationPath "ime-test-windows-qt-${{ matrix.qt-version }}.zip"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ime-test-windows-qt-${{ matrix.qt-version }}
-          path: dist
+          path: ime-test-windows-qt-${{ matrix.qt-version }}.zip
           if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: >-
+      github.event_name != 'pull_request' &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ime-test-windows-qt-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release and upload assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_REF_TYPE: ${{ github.ref_type }}
+          BUILD_REF_NAME: ${{ github.ref_name }}
+          BUILD_SHA: ${{ github.sha }}
+          BUILD_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          assets=(release-assets/ime-test-windows-qt-5.15.2.zip release-assets/ime-test-windows-qt-6.8.3.zip)
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          if [[ "$BUILD_REF_TYPE" == "tag" ]]; then
+            tag="$BUILD_REF_NAME"
+            options=(--verify-tag)
+          else
+            tag="build-$BUILD_RUN_ID"
+            options=(--target "$BUILD_SHA" --prerelease --latest=false)
+          fi
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            gh release create "$tag" "${assets[@]}" "${options[@]}" \
+              --title "Qt Input Test $tag" \
+              --notes "Windows x64 input test builds for Qt 5.15.2 and Qt 6.8.3. Extract each ZIP into a separate directory, keeping all DLLs and the platforms folder. Source commit: $BUILD_SHA."
+          fi

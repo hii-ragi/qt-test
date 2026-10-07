@@ -1,4 +1,7 @@
 build*/
 dist/
 CMakeLists.txt.user*
+
 agent.md
+agents.md
+Agents.md
