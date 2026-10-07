@@ -1,0 +1,62 @@
+name: build-windows
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Deploy Qt runtime
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item build/Release/ime-test.exe dist/
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --compiler-runtime --no-translations dist/ime-test.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item README.md dist/
+
+      - name: Smoke test deployed application
+        run: |
+          foreach ($file in @('ime-test.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll')) {
+            if (!(Test-Path "dist/$file")) { throw "Missing deployment file: $file" }
+          }
+          # Ensure the executable uses deployed Qt files rather than the SDK.
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -and !$_.StartsWith($env:QT_ROOT_DIR, [StringComparison]::OrdinalIgnoreCase) }) -join ';'
+          $env:QT_PLUGIN_PATH = ''
+          $env:QT_QPA_PLATFORM_PLUGIN_PATH = ''
+          $env:QT_QPA_PLATFORM = 'windows'
+          foreach ($kind in @('plain', 'line', 'text')) {
+            & ./dist/ime-test.exe $kind --smoke-test
+            if ($LASTEXITCODE -ne 0) { throw "Startup failed: $kind ($LASTEXITCODE)" }
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ime-test-windows
+          path: dist
+          if-no-files-found: error
