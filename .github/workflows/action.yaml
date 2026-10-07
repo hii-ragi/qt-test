@@ -10,7 +10,18 @@ permissions:
 
 jobs:
   build:
+    name: Qt ${{ matrix.qt-version }}
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - qt-version: '5.15.2'
+            qt-major: '5'
+            qt-arch: 'win64_msvc2019_64'
+          - qt-version: '6.8.3'
+            qt-major: '6'
+            qt-arch: 'win64_msvc2022_64'
     timeout-minutes: 20
     defaults:
       run:
@@ -22,11 +33,11 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.3'
-          arch: 'win64_msvc2022_64'
+          version: ${{ matrix.qt-version }}
+          arch: ${{ matrix.qt-arch }}
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DQT_VERSION_MAJOR=${{ matrix.qt-major }}
 
       - name: Build
         run: cmake --build build --config Release
@@ -41,7 +52,7 @@ jobs:
 
       - name: Smoke test deployed application
         run: |
-          foreach ($file in @('ime-test.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll')) {
+          foreach ($file in @('ime-test.exe', 'Qt${{ matrix.qt-major }}Core.dll', 'Qt${{ matrix.qt-major }}Gui.dll', 'Qt${{ matrix.qt-major }}Widgets.dll', 'platforms/qwindows.dll')) {
             if (!(Test-Path "dist/$file")) { throw "Missing deployment file: $file" }
           }
           # Ensure the executable uses deployed Qt files rather than the SDK.
@@ -57,6 +68,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ime-test-windows
+          name: ime-test-windows-qt-${{ matrix.qt-version }}
           path: dist
           if-no-files-found: error
